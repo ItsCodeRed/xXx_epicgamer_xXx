@@ -86,7 +86,6 @@ class epicgamerbotletsgooolmaoezpz(BaseAgent):
         spiker = who_has_spiked(packet, ball_location)
         time_until_hit = 9999 if not spiker else Vec3(spiker.physics.location).dist(Vec3(my_car.physics.location)) / 1800 + cap((spiker.physics.location.z - 500) / 650, 0, 1)
         target_location = ball_location if not spiker else Vec3(spiker.physics.location) + Vec3(spiker.physics.velocity) * time_until_hit
-
         if len(self.stack) > 0 and not self.stack[-1].can_interupt:
             return self.stack[-1].run(my_car, packet, self)
         if spiker and spiker.team != self.team and target_location.z > 600:
@@ -241,9 +240,9 @@ class shoot:
             if isinstance(agent.stack[-1], wavedash): agent.stack.pop()
             if my_car.has_wheel_contact: self.time_of_jump = packet.game_info.seconds_elapsed
             elapsed = packet.game_info.seconds_elapsed - self.time_of_jump
-            controls.jump = (0.2 > elapsed and my_car.has_wheel_contact) or elapsed > 0.6
-            controls.pitch = 1 if 0.1 < elapsed < 0.6 else -1 if elapsed > 0.6 else 0
-            controls.use_item = elapsed > 0.75
+            controls.jump = (0.2 > elapsed and my_car.has_wheel_contact) or elapsed > 0.5
+            controls.pitch = 1 if 0.1 < elapsed < 0.5 else -1 if elapsed > 0.5 else 0
+            controls.use_item = elapsed > 0.6
             if elapsed > 1: self.time_of_jump = None
 
         if distance > 200: agent.stack.pop()
