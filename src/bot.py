@@ -82,20 +82,20 @@ class epicgamerbotletsgooolmaoezpz(BaseAgent):
         my_car = packet.game_cars[self.index]
         ball_location = Vec3(packet.game_ball.physics.location)
         opponent_goal_location = Vec3(0, 5300 * (-1 if self.team == 1 else 1), 320)
-        my_goal_location = Vec3(0, 4500 * (1 if self.team == 1 else -1), 320)
+        my_goal_location = (Vec3(0, 5100 * (1 if self.team == 1 else -1), 320) + ball_location) / 2
         spiker = who_has_spiked(packet, ball_location)
+        time_until_hit = 9999 if not spiker else Vec3(spiker.physics.location).dist(Vec3(my_car.physics.location)) / 1800 + cap((spiker.physics.location.z - 500) / 650, 0, 1)
+        target_location = ball_location if not spiker else Vec3(spiker.physics.location) + Vec3(spiker.physics.velocity) * time_until_hit
 
         if len(self.stack) > 0 and not self.stack[-1].can_interupt:
             return self.stack[-1].run(my_car, packet, self)
-        if spiker and spiker.name != my_car.name and spiker.physics.location.z > 600:
+        if spiker and spiker.team != self.team and target_location.z > 600:
             return goto(my_goal_location, 2000, my_car, self, packet)
         if spiker and spiker.name == my_car.name:
             if len(self.stack) > 0 and not isinstance(self.stack[-1], shoot): self.stack.pop()
-            if len(self.stack) == 0: self.stack.append(shoot(opponent_goal_location, 2000))
+            if len(self.stack) == 0: self.stack.append(shoot(opponent_goal_location, 2300))
             return self.stack[-1].run(my_car, packet, self)
-        if spiker != None:
-            time_until_hit = Vec3(spiker.physics.location).dist(Vec3(my_car.physics.location)) / 1800 + cap((500 - spiker.physics.location.z) / -650, 0, 1)
-            target_location = Vec3(spiker.physics.location) + Vec3(spiker.physics.velocity) * time_until_hit
+        if spiker and spiker.team != self.team:
             if len(self.stack) > 0 and isinstance(self.stack[-1], intercept) and self.stack[-1].stealing:
                 self.stack[-1].update(target_location, packet.game_info.seconds_elapsed + time_until_hit)
             else:
@@ -114,9 +114,9 @@ def relative_location(center: Vec3, ori: Orientation, target: Vec3) -> Vec3:
 def cap(value: float, minimum: float, maximum: float) -> float:
     return minimum if value < minimum else maximum if value > maximum else value
 
-def steer_toward_target(car: PlayerInfo, target: Vec3) -> float:
+def steer_toward_target(car: PlayerInfo, target: Vec3, rate: float) -> float:
     relative = relative_location(Vec3(car.physics.location), Orientation(car.physics.rotation), target)
-    return cap(math.atan2(relative.y, relative.x) * 5, -1, 1)
+    return cap(((35*(math.atan2(relative.y, relative.x)+rate))**3)/10, -1.0, 1.0)
 
 def who_has_spiked(packet, ball_location):
     closest_candidate = None
@@ -152,12 +152,14 @@ def goto(target_location, target_speed, my_car, agent, packet):
     distance = Vec3(my_car.physics.location).flat().dist(target_location.flat())
     angle = Orientation(my_car.physics.rotation).forward.ang_to(target_location - Vec3(my_car.physics.location))
     controls = SimpleControllerState()
-    controls.steer = steer_toward_target(my_car, target_location)
+    controls.steer = steer_toward_target(my_car, target_location, 0)
+    controls.yaw = steer_toward_target(my_car, target_location, -my_car.physics.angular_velocity.z/6)
     controls.throttle = cap(target_speed - car_speed, -1, 1)
-    controls.boost = target_speed > 1410 and abs(target_speed - car_speed) > 20 and angle < 0.3
+    controls.boost = (target_speed > 1410 and abs(target_speed - car_speed) > 20 and angle < 0.3)
     controls.handbrake = angle > 2.3
+    controls.jump = (1 if my_car.physics.location.y >= 0 else -1) == (1 if agent.team == 1 else -1) and abs(my_car.physics.location.y) > 5000 and my_car.physics.location.z > 200
     controls.use_item = Vec3(my_car.physics.location).dist(Vec3(packet.game_ball.physics.location)) < 200 and relative_location(Vec3(my_car.physics.location), Orientation(my_car.physics.rotation), Vec3(packet.game_ball.physics.location)).z < 75
-    if (abs(target_speed - car_speed) > 20 and angle < 0.3 and distance > 300) and ((target_speed > 1410 and my_car.boost == 0) or 700 < car_speed < 800): agent.stack.append(wavedash(target_location))
+    if (abs(target_speed - car_speed) > 20 and angle < 0.3 and distance > 600) and ((target_speed > 1410 and my_car.boost == 0) or 700 < car_speed < 800): agent.stack.append(wavedash(target_location))
     return controls
 
 class wavedash:
@@ -169,8 +171,8 @@ class wavedash:
         car_location = Vec3(my_car.physics.location)
         vertical_vel = my_car.physics.velocity.z
         controls = SimpleControllerState()
-        controls.yaw = steer_toward_target(my_car, self.target)
-        controls.boost = vertical_vel > 0 or self.tick < 10
+        controls.yaw = steer_toward_target(my_car, self.target, -my_car.physics.angular_velocity.z/6)
+        controls.boost = not (vertical_vel < 0 and car_location.z > 40 and self.tick < 20)
         controls.use_item = car_location.dist(Vec3(packet.game_ball.physics.location)) < 200 and relative_location(car_location, Orientation(my_car.physics.rotation), Vec3(packet.game_ball.physics.location)).z < 75
         if self.tick == 0:
             controls.jump = True
@@ -202,9 +204,8 @@ class intercept:
         time_remaining = self.intercept_time - packet.game_info.seconds_elapsed
         perdicted_location = Vec3(my_car.physics.location).flat() + Vec3(my_car.physics.velocity).flat() * time_remaining
         controls = goto(self.ball_location, Vec3(my_car.physics.location).flat().dist(self.ball_location.flat()) / time_remaining, my_car, agent, packet)
-        if not self.has_quickchatted:
-            self.has_quickshatted = True
-            agent.send_quick_chat(team_only=False, quick_chat=QuickChatSelection.Information_IGotIt)
+        if not self.has_quickchatted: agent.send_quick_chat(team_only=False, quick_chat=QuickChatSelection.Information_IGotIt)
+        self.has_quickchatted = True
 
         if not self.time_of_jump:
             if time_remaining < self.ball_location.z / 500 and perdicted_location.dist(self.ball_location.flat()) < 95 and self.ball_location.z > 140: self.time_of_jump = packet.game_info.seconds_elapsed
@@ -232,7 +233,8 @@ class shoot:
         if not self.time_of_jump:
             for i in range(packet.num_cars):
                 car = packet.game_cars[i]
-                if Vec3(car.physics.location).dist(Vec3(my_car.physics.location)) / Vec3(car.physics.velocity).length() < 2 and car.team != my_car.team and my_car.has_wheel_contact and angle < 0.5:
+                if Vec3(car.physics.location).dist(Vec3(0, 5300 * (-1 if agent.team == 1 else 1), 320)) < Vec3(my_car.physics.location).dist(Vec3(0, 5300 * (-1 if agent.team == 1 else 1), 320)) and \
+                    Vec3(car.physics.location).dist(Vec3(my_car.physics.location)) / Vec3(car.physics.velocity).length() < 1.5 and car.team != my_car.team and my_car.has_wheel_contact and angle < 0.3:
                     self.time_of_jump = packet.game_info.seconds_elapsed
                     if isinstance(agent.stack[-1], wavedash): agent.stack.pop()
         else:
