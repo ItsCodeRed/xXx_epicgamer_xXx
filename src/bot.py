@@ -107,11 +107,8 @@ class epicgamerbotletsgooolmaoezpz(BaseAgent):
                 else: return goto(ball_location, 1400, my_car, self, packet)
             return self.stack[-1].run(my_car, packet, self)
 
-def relative_location(center: Vec3, ori: Orientation, target: Vec3) -> Vec3:
-    return Vec3((target - center).dot(ori.forward), (target - center).dot(ori.right), (target - center).dot(ori.up))
-
-def cap(value: float, minimum: float, maximum: float) -> float:
-    return minimum if value < minimum else maximum if value > maximum else value
+def relative_location(center: Vec3, ori: Orientation, target: Vec3) -> Vec3: return Vec3((target - center).dot(ori.forward), (target - center).dot(ori.right), (target - center).dot(ori.up))
+def cap(value: float, minimum: float, maximum: float) -> float: return minimum if value < minimum else maximum if value > maximum else value
 
 def steer_toward_target(car: PlayerInfo, target: Vec3, rate: float) -> float:
     relative = relative_location(Vec3(car.physics.location), Orientation(car.physics.rotation), target)
