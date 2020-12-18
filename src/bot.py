@@ -82,18 +82,20 @@ class epicgamerbotletsgooolmaoezpz(BaseAgent):
         my_car = packet.game_cars[self.index]
         ball_location = Vec3(packet.game_ball.physics.location)
         opponent_goal_location = Vec3(0, 5300 * (-1 if self.team == 1 else 1), 320)
-        back_pos = (Vec3(0, 5200 * (1 if self.team == 1 else -1), 320) + ball_location) / 2
+        my_goal_location = Vec3(0, 4500 * (1 if self.team == 1 else -1), 320)
         spiker = who_has_spiked(packet, ball_location)
-        time_until_hit = 9999 if not spiker else Vec3(spiker.physics.location).dist(Vec3(my_car.physics.location)) / 1800 + cap((500 - spiker.physics.location.z) / -650, 0, 1)
-        target_location = ball_location if not spiker else Vec3(spiker.physics.location) + Vec3(spiker.physics.velocity) * time_until_hit
 
         if len(self.stack) > 0 and not self.stack[-1].can_interupt:
             return self.stack[-1].run(my_car, packet, self)
-        if spiker and spiker.name != my_car.name and target_location.z > 500:
-            return goto(back_pos, 1400, my_car, self, packet)
+        if spiker and spiker.name != my_car.name and spiker.physics.location.z > 600:
+            return goto(my_goal_location, 2000, my_car, self, packet)
         if spiker and spiker.name == my_car.name:
-            return goto(opponent_goal_location, 2000, my_car, self, packet)
+            if len(self.stack) > 0 and not isinstance(self.stack[-1], shoot): self.stack.pop()
+            if len(self.stack) == 0: self.stack.append(shoot(opponent_goal_location, 2000))
+            return self.stack[-1].run(my_car, packet, self)
         if spiker != None:
+            time_until_hit = Vec3(spiker.physics.location).dist(Vec3(my_car.physics.location)) / 1800 + cap((500 - spiker.physics.location.z) / -650, 0, 1)
+            target_location = Vec3(spiker.physics.location) + Vec3(spiker.physics.velocity) * time_until_hit
             if len(self.stack) > 0 and isinstance(self.stack[-1], intercept) and self.stack[-1].stealing:
                 self.stack[-1].update(target_location, packet.game_info.seconds_elapsed + time_until_hit)
             else:
@@ -127,14 +129,6 @@ def who_has_spiked(packet, ball_location):
             closest_distance = distance
     return closest_candidate
 
-def find_fastest(agent, packet, teammate=None):
-    closest_distance = 99999
-    for i in range(packet.num_cars):
-        car = packet.game_cars[i]
-        if Vec3(car.physics.location).dist(Vec3(packet.game_ball.physics.location)) < closest_distance and ((agent.team == car.team and teammate) or (agent.team != car.team and not teammate)):
-            closest_distance = Vec3(car.physics.location).dist(Vec3(packet.game_ball.physics.location))
-    return closest_distance
-
 def find_shot(ball_prediction, packet, my_car):
     for coarse_index in range(20, ball_prediction.num_slices, 20):
         if test_shot(my_car, Vec3(ball_prediction.slices[coarse_index].physics.location), ball_prediction.slices[coarse_index].game_seconds - packet.game_info.seconds_elapsed):
@@ -153,21 +147,17 @@ def test_shot(my_car, ball_location, time_remaining):
     angle = Orientation(my_car.physics.rotation).forward.ang_to(ball_location - car_location)
     return car_location.dist(ball_location) / (1410 + 900 * (cap(my_car.boost, 0, 30) / 30)) + angle * 0.314 < time_remaining and ball_location.z < 450
 
-def sign(x):
-    return 1 if x >= 0 else -1
-
 def goto(target_location, target_speed, my_car, agent, packet):
     car_speed = Vec3(my_car.physics.velocity).length()
     distance = Vec3(my_car.physics.location).flat().dist(target_location.flat())
     angle = Orientation(my_car.physics.rotation).forward.ang_to(target_location - Vec3(my_car.physics.location))
     controls = SimpleControllerState()
     controls.steer = steer_toward_target(my_car, target_location)
-    controls.throttle = 1 if packet.game_info.is_round_active and packet.game_info.is_kickoff_pause else cap(target_speed - car_speed, -1, 1)
-    controls.boost = True if packet.game_info.is_round_active and packet.game_info.is_kickoff_pause else target_speed > 1410 and abs(target_speed - car_speed) > 20 and angle < 0.3
-    controls.jump = sign(my_car.physics.location.y) == 1 if agent.team == 1 else -1 and abs(my_car.physics.location.y) > 5000 and my_car.physics.location.z > 200
+    controls.throttle = cap(target_speed - car_speed, -1, 1)
+    controls.boost = target_speed > 1410 and abs(target_speed - car_speed) > 20 and angle < 0.3
     controls.handbrake = angle > 2.3
     controls.use_item = Vec3(my_car.physics.location).dist(Vec3(packet.game_ball.physics.location)) < 200 and relative_location(Vec3(my_car.physics.location), Orientation(my_car.physics.rotation), Vec3(packet.game_ball.physics.location)).z < 75
-    if (abs(target_speed - car_speed) > 20 and angle < 0.3 and distance > 1000) and ((target_speed > 1410 and my_car.boost == 0) or 700 < car_speed < 800): agent.stack.append(wavedash(target_location))
+    if (abs(target_speed - car_speed) > 20 and angle < 0.3 and distance > 300) and ((target_speed > 1410 and my_car.boost == 0) or 700 < car_speed < 800): agent.stack.append(wavedash(target_location))
     return controls
 
 class wavedash:
@@ -180,7 +170,7 @@ class wavedash:
         vertical_vel = my_car.physics.velocity.z
         controls = SimpleControllerState()
         controls.yaw = steer_toward_target(my_car, self.target)
-        controls.boost = True
+        controls.boost = vertical_vel > 0 or self.tick < 10
         controls.use_item = car_location.dist(Vec3(packet.game_ball.physics.location)) < 200 and relative_location(car_location, Orientation(my_car.physics.rotation), Vec3(packet.game_ball.physics.location)).z < 75
         if self.tick == 0:
             controls.jump = True
@@ -188,10 +178,9 @@ class wavedash:
         else:
             if self.tick <= 10: self.tick += 1
             elif my_car.has_wheel_contact: agent.stack.pop()
-            elif vertical_vel < 0 and car_location.z > 40 and 20 > self.tick:
+            if vertical_vel < 0 and car_location.z > 40 and self.tick < 20:
                 self.tick += 1
                 controls.pitch = 1
-                controls.boost = False
             if vertical_vel < 0 and car_location.z < 40:
                 controls.jump = True
                 controls.pitch = -1
@@ -214,7 +203,7 @@ class intercept:
         perdicted_location = Vec3(my_car.physics.location).flat() + Vec3(my_car.physics.velocity).flat() * time_remaining
         controls = goto(self.ball_location, Vec3(my_car.physics.location).flat().dist(self.ball_location.flat()) / time_remaining, my_car, agent, packet)
         if not self.has_quickchatted:
-            self.has_quickchatted = True
+            self.has_quickshatted = True
             agent.send_quick_chat(team_only=False, quick_chat=QuickChatSelection.Information_IGotIt)
 
         if not self.time_of_jump:
@@ -229,32 +218,32 @@ class intercept:
 
         return controls
 
-# class shoot:
-#     def __init__(self, target_location, target_speed):
-#         self.target_location = target_location
-#         self.target_speed = target_speed
-#         self.time_of_jump = None
-#         self.can_interupt = True
-#     def run(self, my_car, packet, agent):
-#         distance = Vec3(my_car.physics.location).dist(Vec3(packet.game_ball.physics.location))
-#         angle = Orientation(my_car.physics.rotation).forward.ang_to(self.target_location - Vec3(my_car.physics.location))
-#         controls = goto(self.target_location, self.target_speed, my_car, agent, packet)
+class shoot:
+    def __init__(self, target_location, target_speed):
+        self.target_location = target_location
+        self.target_speed = target_speed
+        self.time_of_jump = None
+        self.can_interupt = True
+    def run(self, my_car, packet, agent):
+        distance = Vec3(my_car.physics.location).dist(Vec3(packet.game_ball.physics.location))
+        angle = Orientation(my_car.physics.rotation).forward.ang_to(self.target_location - Vec3(my_car.physics.location))
+        controls = goto(self.target_location, self.target_speed, my_car, agent, packet)
 
-#         if not self.time_of_jump:
-#             for i in range(packet.num_cars):
-#                 car = packet.game_cars[i]
-#                 if Vec3(car.physics.location).dist(Vec3(my_car.physics.location)) / Vec3(car.physics.velocity).length() < 1.5 and car.team != my_car.team and my_car.has_wheel_contact and angle < 0.3:
-#                     self.time_of_jump = packet.game_info.seconds_elapsed
-#                     if isinstance(agent.stack[-1], wavedash): agent.stack.pop()
-#         else:
-#             if isinstance(agent.stack[-1], wavedash): agent.stack.pop()
-#             if my_car.has_wheel_contact: self.time_of_jump = packet.game_info.seconds_elapsed
-#             elapsed = packet.game_info.seconds_elapsed - self.time_of_jump
-#             controls.jump = (0.2 > elapsed and my_car.has_wheel_contact) or elapsed > 0.6
-#             controls.pitch = 1 if 0.1 < elapsed < 0.6 else -1 if elapsed > 0.6 else 0
-#             controls.use_item = elapsed > 0.75
-#             if elapsed > 1: self.time_of_jump = None
+        if not self.time_of_jump:
+            for i in range(packet.num_cars):
+                car = packet.game_cars[i]
+                if Vec3(car.physics.location).dist(Vec3(my_car.physics.location)) / Vec3(car.physics.velocity).length() < 2 and car.team != my_car.team and my_car.has_wheel_contact and angle < 0.5:
+                    self.time_of_jump = packet.game_info.seconds_elapsed
+                    if isinstance(agent.stack[-1], wavedash): agent.stack.pop()
+        else:
+            if isinstance(agent.stack[-1], wavedash): agent.stack.pop()
+            if my_car.has_wheel_contact: self.time_of_jump = packet.game_info.seconds_elapsed
+            elapsed = packet.game_info.seconds_elapsed - self.time_of_jump
+            controls.jump = (0.2 > elapsed and my_car.has_wheel_contact) or elapsed > 0.6
+            controls.pitch = 1 if 0.1 < elapsed < 0.6 else -1 if elapsed > 0.6 else 0
+            controls.use_item = elapsed > 0.75
+            if elapsed > 1: self.time_of_jump = None
 
-#         if distance > 200: agent.stack.pop()
+        if distance > 200: agent.stack.pop()
 
-#         return controls
+        return controls
